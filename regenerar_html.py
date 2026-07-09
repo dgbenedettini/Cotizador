@@ -4,7 +4,6 @@ import pandas as pd
 import openpyxl
 import os
 from io import BytesIO
-from datetime import datetime
 
 IVA = 1.1
 
@@ -12,19 +11,50 @@ VENTAS_ID  = "1yTBOhEsYhwwjE5EBse3eIT9f69y2FSnI"
 COMPRAS_ID = "1G74OIO7iRQJDXlGjUaacw0x7CIpilsUY"
 
 def download_from_gdrive(file_id):
-    url = f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}"
+    """Descarga el archivo original desde Google Drive (no la conversion de Sheets)"""
     session = requests.Session()
-    r = session.get(url, stream=True, timeout=30)
-    # Handle virus scan warning page for large files
-    for key, value in r.cookies.items():
-        if 'download_warning' in key:
-            url = url + f"&confirm={value}"
-            r = session.get(url, stream=True, timeout=30)
+    
+    # Primer intento: descarga directa del archivo original
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    r = session.get(url, stream=True, timeout=60)
     r.raise_for_status()
-    return BytesIO(r.content)
+    
+    # Si Google muestra pagina de confirmacion por archivo grande, seguirla
+    if 'text/html' in r.headers.get('Content-Type', ''):
+        # Buscar el token de confirmacion en la respuesta
+        import re
+        content = r.text
+        token_match = re.search(r'confirm=([0-9A-Za-z_\-]+)', content)
+        uuid_match  = re.search(r'uuid=([0-9A-Za-z_\-]+)', content)
+        
+        if token_match:
+            token = token_match.group(1)
+            url2 = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
+            r = session.get(url2, stream=True, timeout=60)
+            r.raise_for_status()
+        elif uuid_match:
+            uuid = uuid_match.group(1)
+            url2 = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t&uuid={uuid}"
+            r = session.get(url2, stream=True, timeout=60)
+            r.raise_for_status()
+        else:
+            # Nuevo metodo Google Drive
+            url2 = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+            r = session.get(url2, stream=True, timeout=60)
+            r.raise_for_status()
+    
+    content = r.content
+    print(f"  Descargado: {len(content):,} bytes, tipo: {r.headers.get('Content-Type','?')}")
+    
+    # Verificar que es un archivo Excel (empieza con PK = ZIP)
+    if content[:2] != b'PK':
+        raise ValueError(f"Archivo descargado no es Excel. Primeros bytes: {content[:20]}")
+    
+    return BytesIO(content)
 
 def load_ventas(file_obj):
     wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
+    print(f"  Hojas disponibles: {wb.sheetnames}")
     ws = wb['VENTAS']
     rows, header = [], None
     for i, row in enumerate(ws.iter_rows(values_only=True)):
@@ -41,6 +71,7 @@ def load_ventas(file_obj):
 
 def load_compras(file_obj):
     wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
+    print(f"  Hojas disponibles: {wb.sheetnames}")
     ws = wb['COMPRAS']
     rows, header = [], None
     for i, row in enumerate(ws.iter_rows(values_only=True)):
@@ -80,7 +111,6 @@ def calc_stock(wb_v):
 def build_app_data(df_v, df_c, wb_v, descripciones):
     cp    = calc_costo_ponderado(df_c)
     stock = calc_stock(wb_v)
-
     catalog = cp.merge(stock, on='PRODUCTO', how='left')
     catalog['STOCK'] = catalog['STOCK'].fillna(0).round(1)
     lab_map = df_c[df_c['COSTO'].notna()].groupby('PRODUCTO')['COMPAÑÍA'].first().reset_index()
@@ -123,14 +153,14 @@ def build_app_data(df_v, df_c, wb_v, descripciones):
                 fecha_str = str(row['FECHA'])
         ventas_json[cliente].append({
             'fecha':     fecha_str,
-            'producto':  str(row['PRODUCTO'])   if pd.notna(row['PRODUCTO'])   else '',
-            'lab':       str(row['COMPAÑÍA'])   if pd.notna(row['COMPAÑÍA'])   else '',
-            'volumen':   float(row['VOLUMEN'])  if pd.notna(row['VOLUMEN'])    else None,
-            'precio':    float(row['PRECIO'])   if pd.notna(row['PRECIO'])     else None,
-            'costo':     float(row['COSTO_POND']) if pd.notna(row['COSTO_POND']) else None,
+            'producto':  str(row['PRODUCTO'])      if pd.notna(row['PRODUCTO'])      else '',
+            'lab':       str(row['COMPAÑÍA'])      if pd.notna(row['COMPAÑÍA'])      else '',
+            'volumen':   float(row['VOLUMEN'])     if pd.notna(row['VOLUMEN'])       else None,
+            'precio':    float(row['PRECIO'])      if pd.notna(row['PRECIO'])        else None,
+            'costo':     float(row['COSTO_POND'])  if pd.notna(row['COSTO_POND'])    else None,
             'mb_pct':    row['MB_PCT'],
-            'condicion': str(row['CONDICION'])  if pd.notna(row['CONDICION'])  else '',
-            'total':     float(row['TOTAL C/IVA']) if pd.notna(row['TOTAL C/IVA']) else None
+            'condicion': str(row['CONDICION'])     if pd.notna(row['CONDICION'])     else '',
+            'total':     float(row['TOTAL C/IVA']) if pd.notna(row['TOTAL C/IVA'])   else None
         })
 
     return {
@@ -156,15 +186,17 @@ def main():
     print('Descargando COMPRAS desde Google Drive...')
     compras_file = download_from_gdrive(COMPRAS_ID)
 
-    print('Procesando datos...')
+    print('Cargando VENTAS...')
     df_v, wb_v = load_ventas(ventas_file)
-    df_c       = load_compras(compras_file)
+    print('Cargando COMPRAS...')
+    df_c = load_compras(compras_file)
 
     descripciones = {}
     if os.path.exists('descripciones.json'):
         with open('descripciones.json', encoding='utf-8') as f:
             descripciones = json.load(f)
 
+    print('Calculando datos...')
     app_data = build_app_data(df_v, df_c, wb_v, descripciones)
     update_html(app_data)
     print(f'Listo. Productos: {len(app_data["catalogo"])}, Clientes: {len(app_data["clientes"])}')
