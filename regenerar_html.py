@@ -7,8 +7,8 @@ from io import BytesIO
 
 IVA = 1.1
 
-VENTAS_ID  = "1yTBOhEsYhwwjE5EBse3eIT9f69y2FSnI"
-COMPRAS_ID = "1G74OIO7iRQJDXlGjUaacw0x7CIpilsUY"
+VENTAS_ID  = "1G74OIO7iRQJDXlGjUaacw0x7CIpilsUY"
+COMPRAS_ID = "1yTBOhEsYhwwjE5EBse3eIT9f69y2FSnI"
 
 def download_from_gdrive(file_id):
     """Descarga el archivo original desde Google Drive (no la conversion de Sheets)"""
