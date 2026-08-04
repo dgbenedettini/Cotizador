@@ -493,14 +493,31 @@ function getAdminKey(){
   return k;
 }
 
+function getRucCache(){
+  try{ return JSON.parse(localStorage.getItem('ls_ruc_cache')||'{}'); }catch(e){ return {}; }
+}
+function setRucCache(nombre, ruc){
+  var c = getRucCache();
+  c[nombre.trim().toUpperCase()] = ruc;
+  localStorage.setItem('ls_ruc_cache', JSON.stringify(c));
+}
+
 async function enviarAValidar(){
   if(typeof quoteItems==='undefined' || quoteItems.length===0){ alert('No hay productos en la cotizaci\u00f3n.'); return; }
   var clienteNombre = document.getElementById('cot-cliente').value;
-  if(!clienteNombre){ alert('Seleccion\u00e1 un cliente antes de enviar a validar.'); return; }
+  if(!clienteNombre){
+    clienteNombre = prompt('Este cliente todav\u00eda no est\u00e1 en la lista de "Cotizar" (no tuvo negocios este a\u00f1o).\nEscrib\u00ed su nombre para validar el pedido:');
+    if(!clienteNombre) return;
+    clienteNombre = clienteNombre.trim();
+  }
 
-  var ruc = prompt('RUC del cliente "'+clienteNombre+'":');
-  if(!ruc) return;
-  ruc = ruc.trim();
+  var cache = getRucCache();
+  var ruc = cache[clienteNombre.toUpperCase()];
+  if(!ruc){
+    ruc = prompt('RUC del cliente "'+clienteNombre+'":\n(la pr\u00f3xima vez ya no te lo va a volver a pedir)');
+    if(!ruc) return;
+    ruc = ruc.trim();
+  }
 
   var adminKey = getAdminKey();
   if(!adminKey) return;
@@ -516,12 +533,13 @@ async function enviarAValidar(){
       p_monto_total: total, p_condicion_pago: condicion,
       p_destino: destino, p_observaciones: obs
     });
+    setRucCache(clienteNombre, ruc);
     mostrarLinkGenerado(clienteNombre, PORTAL_URL+'?token='+res.token);
   } catch(err){
     if(String(err.message||'').toLowerCase().indexOf('no registrado')>-1){
-      if(!confirm('Ese RUC no est\u00e1 registrado en el portal. \u00bfRegistrarlo ahora?')) return;
+      if(!confirm('Ese RUC no est\u00e1 registrado en el portal todav\u00eda. \u00bfRegistrarlo ahora?')) return;
       var razonSocial = prompt('Raz\u00f3n social:', clienteNombre) || clienteNombre;
-      var clave = prompt('Contrase\u00f1a para este cliente (despu\u00e9s se la compartis vos):');
+      var clave = prompt('Contrase\u00f1a para este cliente (despu\u00e9s se la compart\u00eds vos):');
       if(!clave) return;
       var tel = prompt('Tel\u00e9fono (opcional):') || '';
       try{
@@ -531,6 +549,7 @@ async function enviarAValidar(){
           p_monto_total: total, p_condicion_pago: condicion,
           p_destino: destino, p_observaciones: obs
         });
+        setRucCache(clienteNombre, ruc);
         mostrarLinkGenerado(clienteNombre, PORTAL_URL+'?token='+res2.token);
       }catch(err2){ alert('Error: '+err2.message); }
     } else {
@@ -598,6 +617,7 @@ async function abrirRegistroCliente(){
   var tel = prompt('Tel\u00e9fono (opcional):') || '';
   try{
     await sbRpc('admin_guardar_cliente', {p_admin_key:adminKey,p_ruc:ruc.trim(),p_razon_social:razonSocial,p_password:clave,p_telefono:tel});
+    setRucCache(razonSocial, ruc.trim());
     alert('Cliente registrado correctamente.');
   }catch(err){ alert('Error: '+err.message); }
 }
