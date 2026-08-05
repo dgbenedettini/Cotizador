@@ -59,17 +59,13 @@
     <div class="sub">Validación de pedidos</div>
   </div>
   <div class="content" id="content">
-    <div class="card">
+    <div class="card" id="login-card">
       <div id="login-error"></div>
       <div class="field-group">
         <div class="field-label">RUC</div>
         <input type="text" id="in-ruc" placeholder="Ej: 80123456-9" autocomplete="off">
       </div>
-      <div class="field-group">
-        <div class="field-label">Contraseña</div>
-        <input type="password" id="in-pass" placeholder="Contraseña">
-      </div>
-      <button class="btn btn-primary" onclick="login()" id="login-btn">Ingresar</button>
+      <button class="btn btn-primary" onclick="continuarConRuc()" id="ruc-btn">Continuar</button>
     </div>
   </div>
 </div>
@@ -102,19 +98,62 @@ function fmtFecha(iso){
   return new Date(iso).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 
-async function login(){
+function tokenDeUrl(){
+  var params = new URLSearchParams(window.location.search);
+  return params.get('token');
+}
+
+async function continuarConRuc(){
   var ruc = document.getElementById('in-ruc').value.trim();
+  var errEl = document.getElementById('login-error');
+  errEl.innerHTML='';
+  if(!ruc){ errEl.innerHTML='<div class="error-box">Ingres\u00e1 tu RUC.</div>'; return; }
+
+  var btn = document.getElementById('ruc-btn');
+  btn.textContent='Verificando...'; btn.disabled=true;
+
+  try{
+    var estado = await sbRpc('cliente_estado', {p_ruc: ruc});
+    if(!estado.existe){
+      errEl.innerHTML='<div class="error-box">No encontramos ese RUC. Verific\u00e1 con Latitud Sur.</div>';
+      btn.textContent='Continuar'; btn.disabled=false;
+      return;
+    }
+    if(!estado.tiene_clave){
+      mostrarFormCrearClave(ruc, estado.razon_social);
+    } else {
+      mostrarFormClave(ruc, estado.razon_social);
+    }
+  }catch(err){
+    errEl.innerHTML='<div class="error-box">'+err.message+'</div>';
+    btn.textContent='Continuar'; btn.disabled=false;
+  }
+}
+
+function mostrarFormClave(ruc, razonSocial){
+  document.getElementById('content').innerHTML =
+    '<div class="card">'
+    +'<div style="font-size:14px;color:#555;margin-bottom:14px">Hola, <b>'+razonSocial+'</b></div>'
+    +'<div id="login-error"></div>'
+    +'<div class="field-group"><div class="field-label">Contrase\u00f1a</div>'
+    +'<input type="password" id="in-pass" placeholder="Contrase\u00f1a" autofocus></div>'
+    +'<button class="btn btn-primary" onclick="loginConClave(\''+ruc+'\')" id="login-btn">Ingresar</button>'
+    +'<div style="text-align:center;margin-top:14px;font-size:12px;color:#999;text-decoration:underline;cursor:pointer" onclick="location.reload()">Usar otro RUC</div>'
+    +'</div>';
+}
+
+async function loginConClave(ruc){
   var pass = document.getElementById('in-pass').value;
   var errEl = document.getElementById('login-error');
   errEl.innerHTML='';
-  if(!ruc || !pass){ errEl.innerHTML='<div class="error-box">Completá RUC y contraseña.</div>'; return; }
-
+  if(!pass){ errEl.innerHTML='<div class="error-box">Ingres\u00e1 tu contrase\u00f1a.</div>'; return; }
   var btn = document.getElementById('login-btn');
   btn.textContent='Ingresando...'; btn.disabled=true;
-
   try{
     var res = await sbRpc('cliente_login', {p_ruc: ruc, p_password: pass});
     sessionRuc = ruc; sessionPass = pass;
+    localStorage.setItem('ls_client_ruc', ruc);
+    localStorage.setItem('ls_client_pass', pass);
     renderPedidos(res.razon_social, res.pedidos);
   }catch(err){
     errEl.innerHTML='<div class="error-box">'+err.message+'</div>';
@@ -122,9 +161,71 @@ async function login(){
   }
 }
 
-function tokenDeUrl(){
-  var params = new URLSearchParams(window.location.search);
-  return params.get('token');
+function mostrarFormCrearClave(ruc, razonSocial){
+  var token = tokenDeUrl();
+  if(!token){
+    document.getElementById('content').innerHTML =
+      '<div class="card">'
+      +'<div style="font-size:14px;color:#555;margin-bottom:10px">Hola, <b>'+razonSocial+'</b></div>'
+      +'<div class="error-box">Todav\u00eda no configuraste tu clave. Para crearla por primera vez, entr\u00e1 desde el link que te enviaron por WhatsApp junto con tu pedido.</div>'
+      +'<div style="text-align:center;margin-top:14px;font-size:12px;color:#999;text-decoration:underline;cursor:pointer" onclick="location.reload()">Volver</div>'
+      +'</div>';
+    return;
+  }
+  document.getElementById('content').innerHTML =
+    '<div class="card">'
+    +'<div style="font-size:14px;color:#555;margin-bottom:6px">Hola, <b>'+razonSocial+'</b></div>'
+    +'<div style="font-size:13px;color:#777;margin-bottom:14px">Es la primera vez que entr\u00e1s. Eleg\u00ed una clave para poder validar tus pedidos de ahora en m\u00e1s.</div>'
+    +'<div id="login-error"></div>'
+    +'<div class="field-group"><div class="field-label">Nueva clave</div>'
+    +'<input type="password" id="in-pass1" placeholder="M\u00ednimo 4 caracteres" autofocus></div>'
+    +'<div class="field-group"><div class="field-label">Repetir clave</div>'
+    +'<input type="password" id="in-pass2" placeholder="Repetir clave"></div>'
+    +'<button class="btn btn-primary" onclick="crearClave(\''+ruc+'\',\''+token+'\')" id="crear-clave-btn">Guardar y continuar</button>'
+    +'</div>';
+}
+
+async function crearClave(ruc, token){
+  var p1 = document.getElementById('in-pass1').value;
+  var p2 = document.getElementById('in-pass2').value;
+  var errEl = document.getElementById('login-error');
+  errEl.innerHTML='';
+  if(!p1 || p1.length<4){ errEl.innerHTML='<div class="error-box">La clave debe tener al menos 4 caracteres.</div>'; return; }
+  if(p1!==p2){ errEl.innerHTML='<div class="error-box">Las claves no coinciden.</div>'; return; }
+  var btn = document.getElementById('crear-clave-btn');
+  btn.textContent='Guardando...'; btn.disabled=true;
+  try{
+    await sbRpc('cliente_crear_clave', {p_ruc: ruc, p_token: token, p_password: p1});
+    var res = await sbRpc('cliente_login', {p_ruc: ruc, p_password: p1});
+    sessionRuc = ruc; sessionPass = p1;
+    localStorage.setItem('ls_client_ruc', ruc);
+    localStorage.setItem('ls_client_pass', p1);
+    renderPedidos(res.razon_social, res.pedidos);
+  }catch(err){
+    errEl.innerHTML='<div class="error-box">'+err.message+'</div>';
+    btn.textContent='Guardar y continuar'; btn.disabled=false;
+  }
+}
+
+async function intentarAutoLogin(){
+  var ruc = localStorage.getItem('ls_client_ruc');
+  var pass = localStorage.getItem('ls_client_pass');
+  if(!ruc || !pass) return;
+  try{
+    var res = await sbRpc('cliente_login', {p_ruc: ruc, p_password: pass});
+    sessionRuc = ruc; sessionPass = pass;
+    renderPedidos(res.razon_social, res.pedidos);
+  }catch(err){
+    localStorage.removeItem('ls_client_ruc');
+    localStorage.removeItem('ls_client_pass');
+  }
+}
+intentarAutoLogin();
+
+function cerrarSesion(){
+  localStorage.removeItem('ls_client_ruc');
+  localStorage.removeItem('ls_client_pass');
+  location.reload();
 }
 
 function itemsHtml(detalle){
@@ -195,7 +296,7 @@ function renderPedidos(razonSocial, pedidos){
     }
   }
 
-  html += '<div class="logout" onclick="location.reload()">Salir</div>';
+  html += '<div class="logout" onclick="cerrarSesion()">Salir</div>';
   document.getElementById('content').innerHTML = html;
 
   if(highlightToken){
