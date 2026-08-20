@@ -11,37 +11,13 @@ VENTAS_ID  = "1jXzje3Rg3reYCPfvZDk06kvBnPBO6WDq"
 COMPRAS_ID = "1B-JKT1VgnnYnEMarUzfKkjdkXTzzLOK1"
 
 def download_from_gdrive(file_id):
-    """Descarga el archivo original desde Google Drive (no la conversion de Sheets)"""
+    """Descarga el archivo desde Google Drive usando export de Google Sheets (siempre actualizado)"""
     session = requests.Session()
     
-    # Primer intento: descarga directa del archivo original
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    # Usar export de Google Sheets - siempre devuelve la version mas reciente
+    url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
     r = session.get(url, stream=True, timeout=60)
     r.raise_for_status()
-    
-    # Si Google muestra pagina de confirmacion por archivo grande, seguirla
-    if 'text/html' in r.headers.get('Content-Type', ''):
-        # Buscar el token de confirmacion en la respuesta
-        import re
-        content = r.text
-        token_match = re.search(r'confirm=([0-9A-Za-z_\-]+)', content)
-        uuid_match  = re.search(r'uuid=([0-9A-Za-z_\-]+)', content)
-        
-        if token_match:
-            token = token_match.group(1)
-            url2 = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
-            r = session.get(url2, stream=True, timeout=60)
-            r.raise_for_status()
-        elif uuid_match:
-            uuid = uuid_match.group(1)
-            url2 = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t&uuid={uuid}"
-            r = session.get(url2, stream=True, timeout=60)
-            r.raise_for_status()
-        else:
-            # Nuevo metodo Google Drive
-            url2 = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
-            r = session.get(url2, stream=True, timeout=60)
-            r.raise_for_status()
     
     content = r.content
     print(f"  Descargado: {len(content):,} bytes, tipo: {r.headers.get('Content-Type','?')}")
