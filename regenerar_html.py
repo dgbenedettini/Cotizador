@@ -83,6 +83,7 @@ def load_descripciones(file_obj):
 def calc_costo_ponderado(df_c):
     df = df_c[df_c['COSTO'].notna() & df_c['VOLUMEN'].notna()].copy()
     df['TOTAL_COSTO'] = df['VOLUMEN'] * df['COSTO']
+    df['PRODUCTO'] = df['PRODUCTO'].astype(str).str.strip()
     cp = df.groupby('PRODUCTO').apply(
         lambda x: round(x['TOTAL_COSTO'].sum() / x['VOLUMEN'].sum(), 4)
         if x['VOLUMEN'].sum() != 0 else None
@@ -99,6 +100,8 @@ def calc_stock(wb_v):
     cols = [None,'CAMPAÑA','FECHA','MOVIMIENTO','PRODUCTO','LAB','VOLUMEN','IN','OUT','CLIENTE','OBS','STATUS']
     df = pd.DataFrame(rows, columns=cols)
     df['VOLUMEN'] = pd.to_numeric(df['VOLUMEN'], errors='coerce')
+    df['PRODUCTO'] = df['PRODUCTO'].astype(str).str.strip()  # elimina espacios al inicio/fin
+    df = df[df['PRODUCTO'].notna() & (df['PRODUCTO'] != '') & (df['PRODUCTO'] != 'nan')]
     stock = df.groupby('PRODUCTO')['VOLUMEN'].sum().reset_index()
     stock.columns = ['PRODUCTO','STOCK']
     return stock
