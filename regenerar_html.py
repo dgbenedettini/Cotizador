@@ -7,8 +7,9 @@ from io import BytesIO
 
 IVA = 1.1
 
-VENTAS_ID  = "1jXzje3Rg3reYCPfvZDk06kvBnPBO6WDq"
-COMPRAS_ID = "1B-JKT1VgnnYnEMarUzfKkjdkXTzzLOK1"
+VENTAS_ID     = "1jXzje3Rg3reYCPfvZDk06kvBnPBO6WDq"
+COMPRAS_ID    = "1B-JKT1VgnnYnEMarUzfKkjdkXTzzLOK1"
+COTIZADOR_ID  = "1sBGkGzZuuBtkMuzo0h1t6IbE7EcSil1X"
 
 def download_from_gdrive(file_id):
     """Descarga el archivo desde Google Drive usando export de Google Sheets (siempre actualizado)"""
@@ -60,6 +61,24 @@ def load_compras(file_obj):
     df['VOLUMEN'] = pd.to_numeric(df['VOLUMEN'], errors='coerce')
     df['COSTO']   = pd.to_numeric(df['COSTO'],   errors='coerce')
     return df
+
+def load_descripciones(file_obj):
+    wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
+    ws = wb['COTIZADOR']
+    rows = []
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i >= 7 and any(x is not None for x in row):
+            rows.append(row[:8])
+    df = pd.DataFrame(rows, columns=['_','COMPANIA','PRODUCTO','DESCRIPCION','COSTO','PRECIO_VENTA','MB','VOLUMEN'])
+    df = df[df['PRODUCTO'].notna() & (df['PRODUCTO'] != 'Producto')].copy()
+    descripciones = {}
+    for _, row in df.iterrows():
+        prod = str(row['PRODUCTO']).strip().upper()
+        desc = str(row['DESCRIPCION']).strip() if pd.notna(row['DESCRIPCION']) and row['DESCRIPCION'] != 0 else ''
+        if prod and desc:
+            descripciones[prod] = desc
+    print(f'  Descripciones cargadas: {len(descripciones)}')
+    return descripciones
 
 def calc_costo_ponderado(df_c):
     df = df_c[df_c['COSTO'].notna() & df_c['VOLUMEN'].notna()].copy()
@@ -167,10 +186,13 @@ def main():
     print('Cargando COMPRAS...')
     df_c = load_compras(compras_file)
 
-    descripciones = {}
-    if os.path.exists('descripciones.json'):
-        with open('descripciones.json', encoding='utf-8') as f:
-            descripciones = json.load(f)
+    print('Descargando COTIZADOR desde Google Drive...')
+    cotizador_file = download_from_gdrive(COTIZADOR_ID)
+    print('Cargando descripciones...')
+    descripciones = load_descripciones(cotizador_file)
+    # Guardar tambien como JSON para respaldo
+    with open('descripciones.json', 'w', encoding='utf-8') as f:
+        json.dump(descripciones, f, ensure_ascii=False)
 
     print('Calculando datos...')
     app_data = build_app_data(df_v, df_c, wb_v, descripciones)
