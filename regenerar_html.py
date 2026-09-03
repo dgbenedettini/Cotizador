@@ -71,14 +71,21 @@ def load_descripciones(file_obj):
             rows.append(row[:8])
     df = pd.DataFrame(rows, columns=['_','COMPANIA','PRODUCTO','DESCRIPCION','COSTO','PRECIO_VENTA','MB','VOLUMEN'])
     df = df[df['PRODUCTO'].notna() & (df['PRODUCTO'] != 'Producto')].copy()
+    df['PRODUCTO'] = df['PRODUCTO'].astype(str).str.strip()
+    df['COSTO'] = pd.to_numeric(df['COSTO'], errors='coerce').fillna(0)
     descripciones = {}
+    cotizador_prods = {}  # producto -> {costo, lab, desc}
     for _, row in df.iterrows():
         prod = str(row['PRODUCTO']).strip().upper()
         desc = str(row['DESCRIPCION']).strip() if pd.notna(row['DESCRIPCION']) and row['DESCRIPCION'] != 0 else ''
-        if prod and desc:
-            descripciones[prod] = desc
-    print(f'  Descripciones cargadas: {len(descripciones)}')
-    return descripciones
+        lab  = str(row['COMPANIA']).strip()    if pd.notna(row['COMPANIA'])    else ''
+        costo = float(row['COSTO']) if row['COSTO'] else 0.0
+        if prod:
+            if desc:
+                descripciones[prod] = desc
+            cotizador_prods[prod] = {'costo': costo, 'lab': lab, 'desc': desc}
+    print(f'  Descripciones cargadas: {len(descripciones)}, productos COTIZADOR: {len(cotizador_prods)}')
+    return descripciones, cotizador_prods
 
 def calc_costo_ponderado(df_c):
     df = df_c[df_c['COSTO'].notna() & df_c['VOLUMEN'].notna()].copy()
@@ -106,7 +113,7 @@ def calc_stock(wb_v):
     stock.columns = ['PRODUCTO','STOCK']
     return stock
 
-def build_app_data(df_v, df_c, wb_v, descripciones):
+def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     cp    = calc_costo_ponderado(df_c)
     stock = calc_stock(wb_v)
     catalog = cp.merge(stock, on='PRODUCTO', how='left')
@@ -114,9 +121,12 @@ def build_app_data(df_v, df_c, wb_v, descripciones):
     lab_map = df_c[df_c['COSTO'].notna()].groupby('PRODUCTO')['COMPAÑÍA'].first().reset_index()
     catalog = catalog.merge(lab_map, on='PRODUCTO', how='left')
 
+    # Products from COMPRAS (with PPP cost)
     catalog_json = []
+    productos_en_compras = set()
     for _, r in catalog.iterrows():
         nombre = str(r['PRODUCTO']).strip().upper()
+        productos_en_compras.add(nombre)
         catalog_json.append({
             'producto': r['PRODUCTO'],
             'costo':    round(float(r['COSTO_POND']), 4),
@@ -124,6 +134,19 @@ def build_app_data(df_v, df_c, wb_v, descripciones):
             'lab':      str(r['COMPAÑÍA']) if pd.notna(r['COMPAÑÍA']) else '',
             'desc':     descripciones.get(nombre, '')
         })
+
+    # Add products from COTIZADOR not yet in COMPRAS
+    for prod_upper, info in cotizador_prods.items():
+        if prod_upper not in productos_en_compras:
+            catalog_json.append({
+                'producto': prod_upper.title() if prod_upper == prod_upper.upper() else prod_upper,
+                'costo':    round(info['costo'], 4),
+                'stock':    0.0,
+                'lab':      info['lab'],
+                'desc':     info['desc']
+            })
+    catalog_json.sort(key=lambda x: x['producto'])
+    print(f'  Catalogo total: {len(catalog_json)} productos ({len(productos_en_compras)} con PPP, {len(catalog_json)-len(productos_en_compras)} solo COTIZADOR)')
 
     df_hist = df_v.merge(cp, on='PRODUCTO', how='left')
 
@@ -192,13 +215,13 @@ def main():
     print('Descargando COTIZADOR desde Google Drive...')
     cotizador_file = download_from_gdrive(COTIZADOR_ID)
     print('Cargando descripciones...')
-    descripciones = load_descripciones(cotizador_file)
+    descripciones, cotizador_prods = load_descripciones(cotizador_file)
     # Guardar tambien como JSON para respaldo
     with open('descripciones.json', 'w', encoding='utf-8') as f:
         json.dump(descripciones, f, ensure_ascii=False)
 
     print('Calculando datos...')
-    app_data = build_app_data(df_v, df_c, wb_v, descripciones)
+    app_data = build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods)
     update_html(app_data)
     print(f'Listo. Productos: {len(app_data["catalogo"])}, Clientes: {len(app_data["clientes"])}')
 
