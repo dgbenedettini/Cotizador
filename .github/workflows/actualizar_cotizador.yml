@@ -2,7 +2,9 @@ name: Actualizar Cotizador
 
 on:
   schedule:
-    - cron: '0 11 * * 1-6'   # Lunes a Sábado a las 11am UTC (7am Paraguay UTC-4)
+    - cron: '20 10 * * 1-6'  # 7:20am Paraguay (GMT-3)
+    - cron: '20 15 * * 1-6'  # 12:20pm Paraguay (GMT-3)
+    - cron: '20 21 * * 1-6'  # 18:20pm Paraguay (GMT-3)
   workflow_dispatch:              # También permite correrlo manualmente desde GitHub
 
 jobs:
