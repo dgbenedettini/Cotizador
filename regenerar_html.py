@@ -139,7 +139,7 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     for prod_upper, info in cotizador_prods.items():
         if prod_upper not in productos_en_compras:
             catalog_json.append({
-                'producto': prod_upper.title() if prod_upper == prod_upper.upper() else prod_upper,
+                'producto': prod_upper,
                 'costo':    round(info['costo'], 4),
                 'stock':    0.0,
                 'lab':      info['lab'],
