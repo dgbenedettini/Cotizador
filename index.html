@@ -571,7 +571,14 @@ const SB_KEY='sb_publishable_VAWqdh6BKVtxAIo3mNF3iA_ZPv5ZJcK';
 
 function getAdminKey(){
   var k=localStorage.getItem('ls_admin_key');
-  if(!k){k=prompt('Clave interna Latitud Sur:');if(k)localStorage.setItem('ls_admin_key',k);}
+  if(!k){k=prompt('Clave interna Latitud Sur:');if(k){k=k.trim();localStorage.setItem('ls_admin_key',k);}}
+  return k;
+}
+
+function resetAdminKey(){
+  localStorage.removeItem('ls_admin_key');
+  var k=prompt('Volv\u00e9 a ingresar la clave interna de Latitud Sur:');
+  if(k){k=k.trim();localStorage.setItem('ls_admin_key',k);}
   return k;
 }
 
@@ -615,7 +622,13 @@ async function cargarPanelPedidos(){
         +'</div></div>';
     });
     el.innerHTML=html;
-  }catch(e){el.innerHTML='<div style="padding:20px;color:#c0392b">Error: '+e.message+'</div>';}
+  }catch(e){
+    if(String(e.message||'').toLowerCase().indexOf('admin_key')>-1){
+      el.innerHTML='<div style="padding:20px;text-align:center"><div style="color:#c0392b;margin-bottom:10px">La clave interna guardada en este dispositivo no es correcta.</div><button style="padding:10px 16px;background:#1a1a18;color:#fff;border:none;border-radius:10px;font-size:13px" onclick="resetAdminKey();cargarPanelPedidos();">Volver a ingresar la clave</button></div>';
+    } else {
+      el.innerHTML='<div style="padding:20px;color:#c0392b">Error: '+e.message+'</div>';
+    }
+  }
 }
 
 function copiarLink(token){
