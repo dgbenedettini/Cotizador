@@ -130,6 +130,7 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
         catalog_json.append({
             'producto': r['PRODUCTO'],
             'costo':    round(float(r['COSTO_POND']), 4),
+            'costo_rep': round(cotizador_prods.get(nombre, {}).get('costo', 0.0), 4),
             'stock':    float(r['STOCK']),
             'lab':      str(r['COMPAÑÍA']) if pd.notna(r['COMPAÑÍA']) else '',
             'desc':     descripciones.get(nombre, '')
@@ -141,6 +142,7 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
             catalog_json.append({
                 'producto': prod_upper,
                 'costo':    round(info['costo'], 4),
+                'costo_rep': round(info['costo'], 4),
                 'stock':    0.0,
                 'lab':      info['lab'],
                 'desc':     info['desc']
