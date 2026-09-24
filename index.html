@@ -593,29 +593,72 @@ async function cargarPanelPedidos(){
   try{
     var data=await sbRpc('admin_listar_pedidos',{p_admin_key:k});
     if(!data||data.length===0){el.innerHTML='<div style="padding:20px;text-align:center;color:#999">Sin pedidos registrados</div>';return;}
-    var html='';
+
+    var grupos={};
+    var orden=[];
     data.forEach(function(p){
-      var aprobado=p.estado==='aprobado';
-      var fecha=p.fecha_creacion?new Date(p.fecha_creacion).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'numeric'}):'';
-      var items=(p.detalle||[]).map(function(i){return '<div style="font-size:12px;padding:2px 0">'+i.producto+' &mdash; '+(i.volumen||'-')+' u &mdash; $'+(i.precio||0).toFixed(2)+'</div>';}).join('');
-      var aprobInfo=aprobado&&p.aprobacion?'<div style="font-size:11px;color:#2f7a3c;margin-top:4px">&#10003; Aprobado '+new Date(p.aprobacion.fecha).toLocaleDateString('es-PY')+(p.aprobacion.ip?' &middot; IP: '+p.aprobacion.ip:'')+'</div>':'';
-      var badgeColor=aprobado?'background:#d4edda;color:#155724':'background:#fff3cd;color:#856404';
-      var badgeTxt=aprobado?'Aprobado':'Pendiente';
-      html+='<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.08)">'
-        +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-        +'<div><div style="font-weight:600;font-size:14px">'+p.razon_social+'</div>'
-        +'<div style="font-size:11px;color:#888">'+fecha+'</div></div>'
-        +'<span style="padding:3px 8px;border-radius:20px;font-size:11px;font-weight:600;'+badgeColor+'">'+badgeTxt+'</span>'
+      if(!grupos[p.ruc]){grupos[p.ruc]={ruc:p.ruc,razon_social:p.razon_social,pedidos:[]};orden.push(p.ruc);}
+      grupos[p.ruc].pedidos.push(p);
+    });
+
+    var html='';
+    orden.forEach(function(ruc){
+      var g=grupos[ruc];
+      var pendientes=g.pedidos.filter(function(p){return p.estado==='pendiente';}).length;
+      var totalGeneral=g.pedidos.reduce(function(s,p){return s+(p.monto_total||0);},0);
+      var gid='grp-'+ruc.replace(/[^a-zA-Z0-9]/g,'');
+
+      var pedidosHtml=g.pedidos.map(function(p){
+        var aprobado=p.estado==='aprobado';
+        var fecha=p.creado_en?new Date(p.creado_en).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+        var items=(p.detalle||[]).map(function(i){return '<div style="font-size:12px;padding:2px 0">'+i.producto+' &mdash; '+(i.volumen||'-')+' u &mdash; $'+(i.precio||0).toFixed(2)+' &mdash; Total: $'+(i.total?Number(i.total).toFixed(2):'-')+'</div>';}).join('');
+        var camposHtml=(p.destino||p.condicion_pago||p.observaciones)?(
+          '<div style="background:#f7f6f0;border-radius:8px;padding:8px 10px;margin-top:8px">'
+          +(p.destino?'<div style="font-size:10px;color:#999;text-transform:uppercase">Entrega / Destino</div><div style="font-size:12px;color:#333;margin-bottom:6px">'+p.destino+'</div>':'')
+          +(p.condicion_pago?'<div style="font-size:10px;color:#999;text-transform:uppercase">Condici\u00f3n</div><div style="font-size:12px;color:#333;margin-bottom:6px">'+p.condicion_pago+'</div>':'')
+          +(p.observaciones?'<div style="font-size:10px;color:#999;text-transform:uppercase">Observaciones</div><div style="font-size:12px;color:#333">'+p.observaciones+'</div>':'')
+          +'</div>'
+        ):'';
+        var aprobInfo=aprobado?(
+          '<div style="font-size:11px;color:#2f7a3c;margin-top:6px">&#10003; Aprobado '+(p.aprobado_en?new Date(p.aprobado_en).toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'')+(p.aprobado_ip?' &middot; IP: '+p.aprobado_ip:'')+'</div>'
+        ):'';
+        var badgeColor=aprobado?'background:#d4edda;color:#155724':'background:#fff3cd;color:#856404';
+        var badgeTxt=aprobado?'Aprobado':'Pendiente';
+        return '<div style="background:#fafaf7;border-radius:10px;padding:12px;margin-bottom:8px;border:1px solid #eee">'
+          +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+          +'<div style="font-size:11px;color:#888">'+fecha+'</div>'
+          +'<span style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;'+badgeColor+'">'+badgeTxt+'</span>'
+          +'</div>'
+          +'<div style="margin-top:6px">'+items+'</div>'
+          +'<div style="font-size:13px;font-weight:600;margin-top:6px">Total: '+fmtUsd(p.monto_total)+'</div>'
+          +camposHtml
+          +aprobInfo
+          +'<div style="display:flex;gap:8px;margin-top:8px">'
+          +(!aprobado?'<button data-token="'+p.token+'" onclick="copiarLink(this.dataset.token)" style="padding:6px 10px;background:#1a1a18;color:#fff;border:none;border-radius:6px;font-size:11px">&#128279; Copiar link</button>':'')
+          +'<button data-id="'+p.id+'" onclick="eliminarPedido(this.dataset.id)" style="padding:6px 10px;background:#c0392b;color:#fff;border:none;border-radius:6px;font-size:11px">Eliminar</button>'
+          +'</div></div>';
+      }).join('');
+
+      html+='<div style="background:#fff;border-radius:12px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden">'
+        +'<div style="padding:14px;cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleGrupoPedidos(\''+gid+'\')">'
+        +'<div><div style="font-weight:600;font-size:14px">'+g.razon_social+'</div>'
+        +'<div style="font-size:11px;color:#888;margin-top:2px">RUC '+g.ruc+' &middot; '+g.pedidos.length+' pedido'+(g.pedidos.length!==1?'s':'')+(pendientes?' &middot; '+pendientes+' pendiente'+(pendientes!==1?'s':''):'')+'</div></div>'
+        +'<div style="text-align:right"><div style="font-weight:600;font-size:14px">'+fmtUsd(totalGeneral)+'</div><div style="font-size:11px;color:#aaa">&#9662;</div></div>'
         +'</div>'
-        +'<div style="margin-top:8px">'+items+'</div>'
-        +aprobInfo
-        +'<div style="display:flex;gap:8px;margin-top:10px">'
-        +(!aprobado?'<button data-token="'+p.token+'" onclick="copiarLink(this.dataset.token)" style="padding:6px 10px;background:#1a1a18;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer">&#128279; Copiar link</button>':'')
-        +' <button data-id="'+p.id+'" onclick="eliminarPedido(this.dataset.id)" style="padding:6px 10px;background:#c0392b;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer">Eliminar</button>'
-        +'</div></div>';
+        +'<div id="'+gid+'" style="display:none;padding:0 14px 14px">'+pedidosHtml+'</div>'
+        +'</div>';
     });
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div style="padding:20px;color:#c0392b">Error: '+e.message+'</div>';}
+}
+
+function toggleGrupoPedidos(id){
+  var el=document.getElementById(id);
+  if(el) el.style.display=(el.style.display==='none'?'block':'none');
+}
+
+function fmtUsd(n){
+  return 'USD '+(n?Number(n).toLocaleString('es-PY',{maximumFractionDigits:2}):'0');
 }
 
 function copiarLink(token){
