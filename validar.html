@@ -249,21 +249,26 @@ function pedidoCardHtml(p, opts){
     : '<span class="estado-chip estado-pendiente">PENDIENTE</span>';
 
   var bodyId = 'detalle-'+p.token;
-  var startsOpen = p.estado==='pendiente' || isHighlight;
+  var startsOpen = true;
+
+  var camposHtml = (p.destino||p.condicion_pago||p.observaciones) ? (
+    '<div style="background:#f7f6f0;border-radius:10px;padding:10px 12px;margin-top:10px">'
+    +(p.destino?'<div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.3px">Entrega / Destino</div><div style="font-size:13px;color:#333;margin-bottom:8px">'+p.destino+'</div>':'')
+    +(p.condicion_pago?'<div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.3px">Condici\u00f3n</div><div style="font-size:13px;color:#333;margin-bottom:8px">'+p.condicion_pago+'</div>':'')
+    +(p.observaciones?'<div style="font-size:10px;color:#999;text-transform:uppercase;letter-spacing:.3px">Observaciones</div><div style="font-size:13px;color:#333">'+p.observaciones+'</div>':'')
+    +'</div>'
+  ) : '';
 
   return '<div class="pedido-card'+(isHighlight?' highlight':'')+'" id="pedido-'+p.token+'">'
     +'<div class="pedido-top" onclick="toggleDetalle(\''+p.token+'\')"><span class="fecha">'+fmtFecha(p.creado_en)+'</span>'+estadoChip+'</div>'
     +'<div id="'+bodyId+'" style="display:'+(startsOpen?'block':'none')+'">'
     + itemsHtml(p.detalle)
     +'<div class="total-row"><span>Total</span><span>'+fmtMoney(p.monto_total)+'</span></div>'
-    +(p.condicion_pago?'<div class="meta-row">Condición: '+p.condicion_pago+'</div>':'')
-    +(p.destino?'<div class="meta-row">Destino: '+p.destino+'</div>':'')
-    +(p.observaciones?'<div class="meta-row">'+p.observaciones+'</div>':'')
+    + camposHtml
     +(p.estado==='pendiente'
         ? '<button class="btn btn-approve" onclick="abrirConsentimiento(\''+p.token+'\')">✓ Confirmar este pedido</button>'
         : '<div class="approved-note">✓ Validado por vos</div>')
     +'</div>'
-    +(startsOpen?'':'<div class="toggle-hint" onclick="toggleDetalle(\''+p.token+'\')">Ver detalle ▸</div>')
     +'</div>';
 }
 
