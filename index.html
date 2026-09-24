@@ -704,7 +704,16 @@ async function enviarAValidar(){
   if(clienteName){
     var cacheKey='ls_ruc_cache_'+clienteName.toUpperCase();
     ruc=localStorage.getItem(cacheKey)||'';
-    if(!ruc){ruc=prompt('RUC de '+clienteName+':');if(ruc) localStorage.setItem(cacheKey,ruc.trim());}
+    if(!ruc){
+      try{
+        var busq=await sbRpc('admin_buscar_cliente_por_nombre',{p_admin_key:k,p_nombre:clienteName});
+        if(busq && busq.encontrado){
+          ruc=busq.ruc;
+          localStorage.setItem(cacheKey,ruc);
+        }
+      }catch(e){}
+    }
+    if(!ruc){ruc=prompt('RUC de '+clienteName+':');if(ruc){ruc=ruc.trim();localStorage.setItem(cacheKey,ruc);}}
   } else {
     var nombre=prompt('Nombre o razón social del cliente:'); if(!nombre) return;
     ruc=prompt('RUC de '+nombre+':'); if(!ruc) return;
