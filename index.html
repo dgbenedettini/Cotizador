@@ -712,11 +712,11 @@ async function enviarAValidar(){
   }
   if(!ruc){alert('RUC requerido.');return;}
   var detalle=quoteItems.map(function(i){return {producto:i.producto,lab:i.lab,volumen:i.volumen,precio:i.precio,total:i.total};});
-  var obs=document.getElementById('obs-text')?document.getElementById('obs-text').value:'';
-  var dest=document.getElementById('dest-text')?document.getElementById('dest-text').value:'';
+  var obs=document.getElementById('q-obs')?document.getElementById('q-obs').value:'';
+  var dest=document.getElementById('q-destino')?document.getElementById('q-destino').value:'';
   try{
     var total=quoteItems.reduce(function(s,i){return s+(i.total||0);},0);
-    var condicion=document.getElementById('cond-text')?document.getElementById('cond-text').value:'';
+    var condicion=document.getElementById('q-vencimiento')?document.getElementById('q-vencimiento').value:'';
     var res=await sbRpc('admin_crear_pedido',{
       p_admin_key:k,
       p_ruc:ruc.trim(),
