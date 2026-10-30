@@ -1,11 +1,22 @@
 name: Actualizar Cotizador
 
+# GitHub retrasa o saltea los cron exactos. En vez de pedir 3 horarios fijos,
+# el workflow se despierta cada 30 minutos y el paso "gate" decide si corresponde
+# actualizar según la franja horaria de Paraguay (GMT-3), una sola vez por franja:
+#   Mañana   07:00 - 11:59
+#   Mediodía 12:00 - 14:59
+#   Tarde    18:00 - 20:59
+# Para saber si ya corrió en la franja, mira el historial de commits del repo
+# (commits de github-actions[bot] desde el inicio de la franja de hoy).
+
 on:
   schedule:
-    - cron: '20 10 * * 1-6'  # 7:20am Paraguay (GMT-3)
-    - cron: '20 15 * * 1-6'  # 12:20pm Paraguay (GMT-3)
-    - cron: '20 21 * * 1-6'  # 18:20pm Paraguay (GMT-3)
-  workflow_dispatch:              # También permite correrlo manualmente desde GitHub
+    - cron: '5,35 10-23 * * 1-6'   # cada 30 min, 07:05 a 20:35 Paraguay, lunes a sábado
+  workflow_dispatch:                # corrida manual: siempre actualiza, sin gate
+
+concurrency:
+  group: actualizar-cotizador
+  cancel-in-progress: false
 
 jobs:
   actualizar:
@@ -14,26 +25,58 @@ jobs:
     steps:
       - name: Checkout repositorio
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 50             # historial reciente, lo usa el gate
+
+      - name: Gate (¿corresponde actualizar en esta franja?)
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Corrida manual: se actualiza."
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          PY_TZ='<-03>3'                       # Paraguay fijo GMT-3
+          DOW=$(TZ=$PY_TZ date +%u)            # 1=lunes ... 7=domingo
+          H=$((10#$(TZ=$PY_TZ date +%H)))
+          HOY=$(TZ=$PY_TZ date +%Y-%m-%d)
+          if [ "$DOW" -eq 7 ]; then
+            echo "Domingo: no se actualiza."; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if   [ $H -ge 7 ]  && [ $H -lt 12 ]; then FRANJA="manana";   INICIO="07"
+          elif [ $H -ge 12 ] && [ $H -lt 15 ]; then FRANJA="mediodia"; INICIO="12"
+          elif [ $H -ge 18 ] && [ $H -lt 21 ]; then FRANJA="tarde";    INICIO="18"
+          else
+            echo "Hora $H fuera de franja: no se actualiza."; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          DESDE="${HOY}T${INICIO}:00:00-03:00"
+          YA=$(git log --author='github-actions\[bot\]' --since="$DESDE" --format='%h %cI %s' | head -n 1)
+          if [ -n "$YA" ]; then
+            echo "Franja $FRANJA ya actualizada: $YA"; echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Franja $FRANJA sin actualizar desde $DESDE: se actualiza."; echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup Python
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Instalar dependencias
+        if: steps.gate.outputs.run == 'true'
         run: pip install requests pandas openpyxl
 
       - name: Regenerar HTML
+        if: steps.gate.outputs.run == 'true'
         run: python regenerar_html.py
 
       - name: Subir index.html actualizado
+        if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git stash
+          git add index.html descripciones.json
+          # Siempre deja un commit (aunque no cambien datos): es la marca que usa el gate
+          git commit --allow-empty -m "Actualizacion automatica $(TZ='<-03>3' date '+%d/%m/%Y %H:%M')"
           git pull --rebase origin main
-          git stash pop
-          git add index.html
-          git diff --cached --quiet || git commit -m "Actualizacion automatica $(date '+%d/%m/%Y %H:%M')"
           git push
