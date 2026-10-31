@@ -111,11 +111,51 @@ def calc_stock(wb_v):
     df = df[df['PRODUCTO'].notna() & (df['PRODUCTO'] != '') & (df['PRODUCTO'] != 'nan')]
     stock = df.groupby('PRODUCTO')['VOLUMEN'].sum().reset_index()
     stock.columns = ['PRODUCTO','STOCK']
-    return stock
+    return stock, df
+
+def _fecha_iso(v):
+    """Fecha de la hoja STOCK a 'aaaa-mm-dd' (acepta datetime, número de Excel o texto dd/mm/aaaa)."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ''
+    if hasattr(v, 'strftime'):
+        return v.strftime('%Y-%m-%d')
+    if isinstance(v, (int, float)):
+        try:
+            return (pd.Timestamp('1899-12-30') + pd.Timedelta(days=float(v))).strftime('%Y-%m-%d')
+        except Exception:
+            return ''
+    s = str(v).strip()
+    try:
+        return pd.to_datetime(s, dayfirst=True).strftime('%Y-%m-%d')
+    except Exception:
+        return s
+
+def build_movimientos(df):
+    """Movimientos por producto, mismas filas que suman el stock:
+    producto -> [[fecha_iso, movimiento, volumen, cliente, obs, status, campaña], ...] ordenados por fecha."""
+    def txt(x):
+        return '' if x is None or (isinstance(x, float) and pd.isna(x)) or str(x).strip().lower() in ('nan', 'none') else str(x).strip()
+    mov = {}
+    for _, r in df.iterrows():
+        v = r['VOLUMEN']
+        if pd.isna(v) or v == 0:
+            continue
+        mov.setdefault(r['PRODUCTO'], []).append([
+            _fecha_iso(r['FECHA']), txt(r['MOVIMIENTO']), round(float(v), 2),
+            txt(r['CLIENTE']), txt(r['OBS'])[:80], txt(r['STATUS']), txt(r['CAMPAÑA'])])
+    for k in mov:
+        mov[k].sort(key=lambda m: m[0])
+    return mov
 
 def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     cp    = calc_costo_ponderado(df_c)
-    stock = calc_stock(wb_v)
+    stock, df_stock = calc_stock(wb_v)
+    try:
+        movimientos = build_movimientos(df_stock)
+        print(f'  Movimientos de stock: {sum(len(v) for v in movimientos.values())} en {len(movimientos)} productos')
+    except Exception as ex:   # si falla el detalle, la actualización sigue igual
+        print(f'  AVISO: no se pudieron armar los movimientos de stock: {ex}')
+        movimientos = {}
     catalog = cp.merge(stock, on='PRODUCTO', how='left')
     catalog['STOCK'] = catalog['STOCK'].fillna(0).round(1)
     lab_map = df_c[df_c['COSTO'].notna()].groupby('PRODUCTO')['COMPAÑÍA'].first().reset_index()
@@ -189,7 +229,8 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     return {
         'catalogo': catalog_json,
         'clientes': sorted(ventas_json.keys()),
-        'ventas':   ventas_json
+        'ventas':   ventas_json,
+        'movimientos': movimientos
     }
 
 def update_html(app_data):
