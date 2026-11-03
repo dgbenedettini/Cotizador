@@ -422,30 +422,28 @@ function calcCotiz(){
     } else repGanRow.style.display='none';
   } else { repMbRow.style.display='none'; repGanRow.style.display='none'; }
   // Agregar requiere precio contado (la cotización y el PDF se arman sobre el contado)
-  btn.disabled=!hayC;
-  document.getElementById('r-hint').style.display=hayC?'none':'block';
+  btn.disabled=!(hayC||hayF);
+  document.getElementById('r-hint').style.display='none';
 }
 function addToQuote(){
   if(!selectedProd)return;
-  const precio=parseFloat(document.getElementById('cot-precio').value);
+  const precio=parseFloat(document.getElementById('cot-precio').value)||0;
   const vol=parseFloat(document.getElementById('cot-vol').value)||0;
-  if(!precio||precio<=0)return;
+  const precioFin=parseFloat(document.getElementById('cot-precio-fin').value)||0;
+  if(precio<=0&&precioFin<=0)return;
   const IVA=1.1;
   const costoNeto=selectedProd.costo/IVA;
-  const precioNeto=precio/IVA;
-  const margenNeto=precioNeto-costoNeto;
-  const mbPct=margenNeto/precio*100;
-  const precioFin=parseFloat(document.getElementById('cot-precio-fin').value)||0;
+  const mbPct=precio>0?(precio/IVA-costoNeto)/precio*100:null;
   const mbPctFin=precioFin>0?(precioFin/IVA-costoNeto)/precioFin*100:null;
   quoteItems.push({
     producto: selectedProd.producto,
     lab: selectedProd.lab,
     desc: selectedProd.desc||'',
     costo: selectedProd.costo,
-    precio: precio,
+    precio: precio>0?precio:null,
     precio_fin: precioFin>0?precioFin:null,
     volumen: vol,
-    total: vol>0?precio*vol:null,
+    total: (precio>0&&vol>0)?precio*vol:null,
     total_fin: (precioFin>0&&vol>0)?precioFin*vol:null,
     mb_pct: mbPct,
     mb_pct_fin: mbPctFin
@@ -465,13 +463,19 @@ function addToQuote(){
   btn.style.background='var(--g)';
   setTimeout(function(){btn.textContent='+ Agregar a cotizaci\u00f3n';btn.style.background='';btn.disabled=true;},1200);
 }
+function quoteTotalTxt(){
+  const tc=quoteItems.reduce(function(s,i){return s+(i.total||0);},0);
+  const tf=quoteItems.reduce(function(s,i){return s+(i.total_fin||0);},0);
+  if(tc>0) return 'USD '+fmtInt(tc);
+  if(tf>0) return 'Fin. USD '+fmtInt(tf);
+  return '';
+}
 function updateQuoteBar(){
   const bar=document.getElementById('quote-bar');
   if(quoteItems.length===0){bar.style.display='none';return;}
   bar.style.display='flex';
   document.getElementById('quote-bar-count').textContent=quoteItems.length+' producto'+(quoteItems.length>1?'s':'');
-  const total=quoteItems.filter(i=>i.total).reduce((s,i)=>s+i.total,0);
-  document.getElementById('quote-bar-total').textContent=total>0?'USD '+fmtInt(total):'';
+  document.getElementById('quote-bar-total').textContent=quoteTotalTxt();
 }
 function goToQuote(){
   renderQuote();
@@ -485,9 +489,9 @@ function editQuoteItem(idx){
     +'<div class="qi-prod">'+item.producto+'</div>'
     +'<div style="display:flex;gap:8px;margin-top:8px;align-items:center">'
     +'<div style="flex:1"><div style="font-size:11px;color:var(--t2);margin-bottom:3px">Precio contado</div>'
-    +'<input type="number" id="edit-precio-'+idx+'" value="'+item.precio.toFixed(2)+'" step="0.01" style="width:100%;padding:6px 8px;border:1.5px solid var(--g);border-radius:8px;font-size:13px"></div>'
-    +(item.precio_fin?'<div style="flex:1"><div style="font-size:11px;color:var(--t2);margin-bottom:3px">Precio financiado</div>'
-    +'<input type="number" id="edit-preciofin-'+idx+'" value="'+item.precio_fin.toFixed(2)+'" step="0.01" style="width:100%;padding:6px 8px;border:1.5px solid var(--g);border-radius:8px;font-size:13px"></div>':'')
+    +'<input type="number" id="edit-precio-'+idx+'" value="'+(item.precio>0?item.precio.toFixed(2):'')+'" placeholder="-" step="0.01" style="width:100%;padding:6px 8px;border:1.5px solid var(--g);border-radius:8px;font-size:13px"></div>'
+    +'<div style="flex:1"><div style="font-size:11px;color:var(--t2);margin-bottom:3px">Precio financiado</div>'
+    +'<input type="number" id="edit-preciofin-'+idx+'" value="'+(item.precio_fin>0?item.precio_fin.toFixed(2):'')+'" placeholder="-" step="0.01" style="width:100%;padding:6px 8px;border:1.5px solid var(--g);border-radius:8px;font-size:13px"></div>'
     +'<div style="flex:1"><div style="font-size:11px;color:var(--t2);margin-bottom:3px">Volumen</div>'
     +'<input type="number" id="edit-vol-'+idx+'" value="'+(item.volumen||'')+'" step="1" style="width:100%;padding:6px 8px;border:1.5px solid var(--g);border-radius:8px;font-size:13px"></div>'
     +'</div>'
@@ -499,25 +503,19 @@ function editQuoteItem(idx){
 
 function confirmEdit(idx){
   const item=quoteItems[idx];
-  const precio=parseFloat(document.getElementById('edit-precio-'+idx).value);
+  const precio=parseFloat(document.getElementById('edit-precio-'+idx).value)||0;
+  const pf=parseFloat(document.getElementById('edit-preciofin-'+idx).value)||0;
   const vol=parseFloat(document.getElementById('edit-vol-'+idx).value)||0;
   const IVA=1.1;
-  if(!precio||precio<=0){alert('Precio inválido.');return;}
+  if(precio<=0&&pf<=0){alert('Cargá al menos un precio (contado o financiado).');return;}
   const costoNeto=item.costo/IVA;
-  const mbPct=(precio/IVA-costoNeto)/precio*100;
-  item.precio=precio;
   item.volumen=vol;
-  item.total=vol>0?precio*vol:null;
-  item.mb_pct=round1(mbPct);
-  const finEl=document.getElementById('edit-preciofin-'+idx);
-  if(finEl){
-    const pf=parseFloat(finEl.value)||0;
-    if(pf>0){
-      item.precio_fin=pf;
-      item.total_fin=vol>0?pf*vol:null;
-      item.mb_pct_fin=round1((pf/IVA-costoNeto)/pf*100);
-    }
-  }
+  item.precio=precio>0?precio:null;
+  item.total=(precio>0&&vol>0)?precio*vol:null;
+  item.mb_pct=precio>0?round1((precio/IVA-costoNeto)/precio*100):null;
+  item.precio_fin=pf>0?pf:null;
+  item.total_fin=(pf>0&&vol>0)?pf*vol:null;
+  item.mb_pct_fin=pf>0?round1((pf/IVA-costoNeto)/pf*100):null;
   renderQuote();
   updateQuoteBar();
 }
@@ -527,24 +525,27 @@ function round1(n){return Math.round(n*10)/10;}
 function renderQuote(){
   const cliente=getClienteName();
   document.getElementById('q-cliente').textContent=cliente||'Sin cliente';
-  const total=quoteItems.filter(i=>i.total).reduce((s,i)=>s+i.total,0);
-  document.getElementById('q-total').textContent=total>0?'USD '+fmtInt(total):'-';
+  document.getElementById('q-total').textContent=quoteTotalTxt()||'-';
   renderQuoteResumen();
   const el=document.getElementById('quote-items-list');
   if(!quoteItems.length){el.innerHTML='<div class="empty">Sin productos en la cotizaci\u00f3n</div>';return;}
   el.innerHTML=quoteItems.map(function(item,idx){
-    const mbC=mbClass(item.mb_pct);
+    const hayC=item.precio>0, hayF=item.precio_fin>0;
+    const badges=(hayC&&item.mb_pct!=null?'<span class="mb-badge '+mbClass(item.mb_pct)+'" style="font-size:11px">MB '+(hayF?'cont. ':'')+item.mb_pct.toFixed(1)+'%</span>':'')
+      +(hayF&&item.mb_pct_fin!=null?' <span class="mb-badge '+mbClass(item.mb_pct_fin)+'" style="font-size:11px">MB fin. '+item.mb_pct_fin.toFixed(1)+'%</span>':'');
     return '<div class="quote-item">'
       +'<div class="qi-main" id="qi-'+idx+'">'
       +'<div class="qi-prod">'+item.producto+'</div>'
-      +(item.precio_fin?'<div class="qi-prices"><span>Contado: <b>$'+item.precio.toFixed(2)+'</b></span> <span>Financiado: <b>$'+item.precio_fin.toFixed(2)+'</b></span></div>':'')
+      +(hayC&&hayF?'<div class="qi-prices"><span>Contado: <b>$'+item.precio.toFixed(2)+'</b></span> <span>Financiado: <b>$'+item.precio_fin.toFixed(2)+'</b></span></div>':'')
+      +(!hayC&&hayF?'<div class="qi-prices"><span>Solo financiado</span></div>':'')
       +'<div class="qi-detail">'+item.lab
         +(item.volumen>0?' &middot; '+fmtInt(item.volumen)+' u':'')
-        +' &middot; <span class="mb-badge '+mbC+'" style="font-size:11px">MB '+(item.precio_fin?'cont. ':'')+item.mb_pct.toFixed(1)+'%</span>'+(item.precio_fin&&item.mb_pct_fin!=null?' <span class="mb-badge '+mbClass(item.mb_pct_fin)+'" style="font-size:11px">MB fin. '+item.mb_pct_fin.toFixed(1)+'%</span>':'')+'</div>'
+        +' &middot; '+badges+'</div>'
       +'</div>'
       +'<div class="qi-right">'
-      +'<div class="qi-precio">$'+item.precio.toFixed(2)+'</div>'
-      +(item.total?'<div class="qi-total">Total: $'+fmtInt(item.total)+'</div>':'')
+      +'<div class="qi-precio">'+(hayC?'$'+item.precio.toFixed(2):'Fin. $'+item.precio_fin.toFixed(2))+'</div>'
+      +(hayC&&item.total?'<div class="qi-total">Total: $'+fmtInt(item.total)+'</div>':'')
+      +(!hayC&&item.total_fin?'<div class="qi-total">Total fin.: $'+fmtInt(item.total_fin)+'</div>':'')
       +'</div>'
       +'<button class="qi-edit" onclick="editQuoteItem('+idx+')" style="background:none;border:none;font-size:16px;cursor:pointer;padding:2px 6px;color:var(--g)" title="Editar">&#9998;</button>'
       +'<button class="qi-del" onclick="removeQuoteItem('+idx+')">&#215;</button>'
@@ -575,14 +576,15 @@ function generatePDF(){
   var totalFin=quoteItems.reduce(function(s,i){return s+(i.total_fin||0);},0);
   var rows='';
   var hayFin=quoteItems.some(function(i){return i.precio_fin;});
+  var hayCont=quoteItems.some(function(i){return i.precio;});
   quoteItems.forEach(function(item){
     rows+='<tr>'
       +'<td><b>'+item.producto+'</b>'+(item.desc?'<br><span style="font-size:11px;color:#555">'+item.desc+'</span>':'')
       +'<br><span style="font-size:11px;color:#aaa">'+item.lab+'</span></td>'
       +'<td style="text-align:center">'+(item.volumen>0?fmtInt(item.volumen)+' u':'-')+'</td>'
-      +'<td style="text-align:right;font-weight:500">$'+item.precio.toFixed(2)+'</td>'
+      +(hayCont?'<td style="text-align:right;font-weight:500">'+(item.precio?'$'+item.precio.toFixed(2):'-')+'</td>':'')
       +(hayFin?'<td style="text-align:right;font-weight:500">'+(item.precio_fin?'$'+item.precio_fin.toFixed(2):'-')+'</td>':'')
-      +'<td style="text-align:right">'+(item.total?'$'+fmtInt(item.total):'-')+'</td>'
+      +(hayCont?'<td style="text-align:right">'+(item.total?'$'+fmtInt(item.total):'-')+'</td>':'')
       +(hayFin?'<td style="text-align:right">'+(item.total_fin?'$'+fmtInt(item.total_fin):'-')+'</td>':'')
       +'</tr>';
   });
@@ -617,7 +619,9 @@ function generatePDF(){
     +'</div></div>'
     +'<table><thead><tr>'
     +'<th>Producto</th><th style="text-align:center">Volumen</th>'
-    +(hayFin?'<th style="text-align:right">Contado c/IVA</th><th style="text-align:right">Financiado c/IVA</th><th style="text-align:right">Total Contado</th><th style="text-align:right">Total Financiado</th>':'<th style="text-align:right">Precio c/IVA</th><th style="text-align:right">Total</th>')
+    +(hayFin&&hayCont?'<th style="text-align:right">Contado c/IVA</th><th style="text-align:right">Financiado c/IVA</th><th style="text-align:right">Total Contado</th><th style="text-align:right">Total Financiado</th>'
+      :hayFin?'<th style="text-align:right">Financiado c/IVA</th><th style="text-align:right">Total Financiado</th>'
+      :'<th style="text-align:right">Precio c/IVA</th><th style="text-align:right">Total</th>')
     +'</tr></thead><tbody>'+rows+'</tbody></table>'
     +(total>0?'<div class="tot"><span class="tot-lbl">Total contado</span><span class="tot-val">USD '+fmtInt(total)+'</span></div>':'')+(hayFin&&totalFin>0?'<div class="tot"><span class="tot-lbl">Total financiado</span><span class="tot-val">USD '+fmtInt(totalFin)+'</span></div>':'')
     +((destino||venc)?'<div class="info-grid">'
@@ -715,7 +719,7 @@ function renderQuoteResumen(){
       +'<span class="mb-badge '+mbClass(r.mb)+'">MB '+r.mb.toFixed(1)+'%</span></span></div>';
   }
   let h='<div class="qr-card">';
-  if(c.n) h+=fila('Contado',c);
+  if(c.n) h+=fila('Contado',c, c.n<quoteItems.length?'('+c.n+' de '+quoteItems.length+' productos)':'');
   if(f.n) h+=fila('Financiado',f, f.n<quoteItems.length?'('+f.n+' de '+quoteItems.length+' productos)':'');
   if(sinVol) h+='<div class="qr-note">'+sinVol+' producto'+(sinVol>1?'s':'')+' sin volumen, no '+(sinVol>1?'entran':'entra')+' en el total.</div>';
   el.innerHTML=h+'</div>';
@@ -934,11 +938,11 @@ async function enviarAValidar(){
     try{await sbRpc('admin_guardar_cliente',{p_admin_key:k,p_ruc:ruc.trim(),p_razon_social:nombre.trim(),p_telefono:''});}catch(e){}
   }
   if(!ruc){alert('RUC requerido.');return;}
-  var detalle=quoteItems.map(function(i){return {producto:i.producto,lab:i.lab,volumen:i.volumen,precio:i.precio,total:i.total};});
+  var detalle=quoteItems.map(function(i){var soloFin=!(i.precio>0);return {producto:i.producto,lab:i.lab,volumen:i.volumen,precio:soloFin?i.precio_fin:i.precio,total:soloFin?i.total_fin:i.total,financiado:soloFin};});
   var obs=document.getElementById('q-obs')?document.getElementById('q-obs').value:'';
   var dest=document.getElementById('q-destino')?document.getElementById('q-destino').value:'';
   try{
-    var total=quoteItems.reduce(function(s,i){return s+(i.total||0);},0);
+    var total=detalle.reduce(function(s,i){return s+(i.total||0);},0);
     var condicion=document.getElementById('q-vencimiento')?document.getElementById('q-vencimiento').value:'';
     var res=await sbRpc('admin_crear_pedido',{
       p_admin_key:k,
