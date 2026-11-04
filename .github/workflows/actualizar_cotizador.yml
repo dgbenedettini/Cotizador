@@ -78,5 +78,9 @@ jobs:
           git add index.html descripciones.json
           # Siempre deja un commit (aunque no cambien datos): es la marca que usa el gate
           git commit --allow-empty -m "Actualizacion automatica $(TZ='<-03>3' date '+%d/%m/%Y %H:%M')"
-          git pull --rebase origin main
-          git push
+          # GitHub a veces responde "Internal Server Error" al subir: reintenta hasta 5 veces
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            echo "Intento $i de subida fallido; reintento en 20 s..."; sleep 20
+          done
+          echo "No se pudo subir después de 5 intentos."; exit 1
