@@ -1,0 +1,110 @@
+name: Probar descarga OneDrive
+
+# Workflow de PRUEBA. Solo corre a mano (Run workflow). No modifica nada del repositorio.
+# Prueba distintas formas de bajar COMPRAS 2627 directo desde OneDrive y muestra cuál funciona.
+# Necesita el secreto ONEDRIVE_COMPRAS_URL con el vínculo "Cualquier persona" del archivo.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests openpyxl
+
+      - name: Probar métodos de descarga
+        env:
+          SHARE_URL: ${{ secrets.ONEDRIVE_COMPRAS_URL }}
+        run: |
+          python - <<'EOF'
+          import os, base64, io, re, requests, openpyxl
+          url = os.environ.get('SHARE_URL', '').strip()
+          if not url:
+              raise SystemExit('Falta el secreto ONEDRIVE_COMPRAS_URL')
+          H = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36'}
+          enc = 'u!' + base64.urlsafe_b64encode(url.encode()).decode().rstrip('=')
+
+          def es_excel(b):
+              return b[:2] == b'PK'
+
+          def revisar(nombre, r):
+              b = r.content if r is not None else b''
+              ct = r.headers.get('Content-Type', '?') if r is not None else '-'
+              code = r.status_code if r is not None else '-'
+              ok = r is not None and r.status_code == 200 and es_excel(b)
+              print(f'\n=== {nombre}: HTTP {code} | {ct[:45]} | {len(b):,} bytes | {"EXCEL OK" if ok else "no sirve"}')
+              if not ok:
+                  return False
+              wb = openpyxl.load_workbook(io.BytesIO(b), read_only=True, data_only=True)
+              print('   Hojas:', wb.sheetnames)
+              if 'COMPRAS' in wb.sheetnames:
+                  filas = [r for r in wb['COMPRAS'].iter_rows(values_only=True) if r and len(r) > 3 and r[3] not in (None, '', 'PRODUCTO')]
+                  print('   Últimas compras cargadas (debería verse la más reciente):')
+                  for f in filas[-4:]:
+                      print('     ', [x for x in f[:12] if x is not None][:8])
+              return True
+
+          resultados = {}
+
+          # 1) API de OneDrive (anónima)
+          try:
+              r = requests.get(f'https://api.onedrive.com/v1.0/shares/{enc}/root/content', headers=H, timeout=60, allow_redirects=True)
+          except Exception as e:
+              print('\n=== Método 1 error:', e); r = None
+          resultados['1 API OneDrive'] = revisar('Método 1 - API OneDrive', r)
+
+          # 2) Vínculo + download=1
+          try:
+              sep = '&' if '?' in url else '?'
+              r = requests.get(url + sep + 'download=1', headers=H, timeout=60, allow_redirects=True)
+          except Exception as e:
+              print('\n=== Método 2 error:', e); r = None
+          resultados['2 Vínculo + download=1'] = revisar('Método 2 - vínculo + download=1', r)
+
+          # 3) Seguir el vínculo y pedir la versión de descarga de onedrive.live.com
+          try:
+              r0 = requests.get(url, headers=H, timeout=60, allow_redirects=True)
+              final = r0.url
+              cands = []
+              if 'redir' in final or 'embed' in final:
+                  cands.append(final.replace('/redir', '/download').replace('/embed', '/download'))
+              m = re.search(r'resid=([^&]+)', final); a = re.search(r'authkey=([^&]+)', final); c = re.search(r'cid=([^&]+)', final)
+              if m:
+                  cands.append(f'https://onedrive.live.com/download?resid={m.group(1)}' + (f'&cid={c.group(1)}' if c else '') + (f'&authkey={a.group(1)}' if a else ''))
+              r = None
+              for cu in cands:
+                  r = requests.get(cu, headers=H, timeout=60, allow_redirects=True)
+                  if r.status_code == 200 and es_excel(r.content):
+                      break
+              if not cands:
+                  print('\n=== Método 3: el vínculo no trae parámetros de descarga clásicos')
+          except Exception as e:
+              print('\n=== Método 3 error:', e); r = None
+          resultados['3 Descarga clásica'] = revisar('Método 3 - descarga clásica', r)
+
+          # 4) Token anónimo de OneDrive personal (método actual que usa la web de OneDrive)
+          try:
+              t = requests.post('https://api-badgerp.svc.ms/v1.0/token', json={'appId': '5cbed6ac-a083-4e14-b191-b4ba07653de2'}, headers=H, timeout=30)
+              tok = t.json().get('token')
+              HB = dict(H, Authorization='Badger ' + tok, Prefer='autoredeem')
+              meta = requests.get(f'https://my.microsoftpersonalcontent.com/_api/v2.0/shares/{enc}/driveitem', headers=HB, timeout=60)
+              if meta.ok:
+                  j = meta.json(); print('\n   (Método 4) Archivo:', j.get('name'), '| última modificación (UTC):', j.get('lastModifiedDateTime'))
+              r = requests.get(f'https://my.microsoftpersonalcontent.com/_api/v2.0/shares/{enc}/driveitem/content', headers=HB, timeout=60, allow_redirects=True)
+          except Exception as e:
+              print('\n=== Método 4 error:', e); r = None
+          resultados['4 Token anónimo'] = revisar('Método 4 - token anónimo', r)
+
+          print('\n================ RESUMEN ================')
+          for k, v in resultados.items():
+              print(f'{k:28} {"FUNCIONA" if v else "no"}')
+          if not any(resultados.values()):
+              raise SystemExit('Ningún método funcionó')
+          EOF
