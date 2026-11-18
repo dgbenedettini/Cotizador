@@ -69,6 +69,10 @@ jobs:
       - name: Regenerar HTML
         if: steps.gate.outputs.run == 'true'
         run: python regenerar_html.py
+        env:
+          ONEDRIVE_VENTAS_2627: ${{ secrets.ONEDRIVE_VENTAS_2627 }}
+          ONEDRIVE_COMPRAS_2627: ${{ secrets.ONEDRIVE_COMPRAS_2627 }}
+          ONEDRIVE_COTIZADOR_2627: ${{ secrets.ONEDRIVE_COTIZADOR_2627 }}
 
       - name: Subir index.html actualizado
         if: steps.gate.outputs.run == 'true'
