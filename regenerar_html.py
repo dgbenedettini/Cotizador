@@ -11,6 +11,61 @@ VENTAS_ID     = "1jXzje3Rg3reYCPfvZDk06kvBnPBO6WDq"
 COMPRAS_ID    = "1B-JKT1VgnnYnEMarUzfKkjdkXTzzLOK1"
 COTIZADOR_ID  = "1sBGkGzZuuBtkMuzo0h1t6IbE7EcSil1X"
 
+# ─── Descarga desde OneDrive (con respaldo en Google Drive) ─────────
+# Cada Excel tiene un vínculo "Cualquier persona con el vínculo puede ver" guardado
+# como secreto de GitHub (variable de entorno). Si OneDrive falla, se usa Google Drive
+# como antes y queda un aviso en GitHub Actions.
+import base64 as _b64
+import time as _time
+
+_OD_HEADERS = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
+
+
+def _onedrive_bytes(share_url):
+    errores = []
+    for intento in (1, 2):
+        # Método A: vínculo + download=1
+        try:
+            sep = '&' if '?' in share_url else '?'
+            r = requests.get(share_url + sep + 'download=1', headers=_OD_HEADERS, timeout=90, allow_redirects=True)
+            if r.status_code == 200 and r.content[:2] == b'PK':
+                return r.content, 'vinculo directo'
+            errores.append(f'vinculo HTTP {r.status_code}')
+        except Exception as e:
+            errores.append(f'vinculo: {e}')
+        # Método B: token anónimo de OneDrive personal
+        try:
+            enc = 'u!' + _b64.urlsafe_b64encode(share_url.encode()).decode().rstrip('=')
+            tok = requests.post('https://api-badgerp.svc.ms/v1.0/token',
+                                json={'appId': '5cbed6ac-a083-4e14-b191-b4ba07653de2'},
+                                headers=_OD_HEADERS, timeout=30).json()['token']
+            h = dict(_OD_HEADERS, Authorization='Badger ' + tok, Prefer='autoredeem')
+            r = requests.get(f'https://my.microsoftpersonalcontent.com/_api/v2.0/shares/{enc}/driveitem/content',
+                             headers=h, timeout=90, allow_redirects=True)
+            if r.status_code == 200 and r.content[:2] == b'PK':
+                return r.content, 'token anonimo'
+            errores.append(f'token HTTP {r.status_code}')
+        except Exception as e:
+            errores.append(f'token: {e}')
+        if intento == 1:
+            _time.sleep(10)
+    raise RuntimeError('; '.join(errores))
+
+
+def descargar_excel(nombre, secreto, respaldo):
+    """Devuelve el Excel como BytesIO: primero OneDrive; si no se puede, respaldo() (Google Drive)."""
+    url = os.environ.get(secreto, '').strip()
+    if url:
+        try:
+            data, metodo = _onedrive_bytes(url)
+            print(f"  {nombre}: OneDrive ({metodo}), {len(data):,} bytes")
+            return BytesIO(data)
+        except Exception as e:
+            print(f"::warning::{nombre}: no se pudo bajar de OneDrive ({e}). Se usa Google Drive: los datos pueden estar desactualizados.")
+    else:
+        print(f"::warning::{nombre}: falta el secreto {secreto}. Se usa Google Drive: los datos pueden estar desactualizados.")
+    return respaldo()
+
 def download_from_gdrive(file_id):
     """Descarga el archivo desde Google Drive usando export de Google Sheets (siempre actualizado)"""
     session = requests.Session()
@@ -245,18 +300,18 @@ def update_html(app_data):
     print(f'index.html actualizado — {len(html):,} chars')
 
 def main():
-    print('Descargando VENTAS desde Google Drive...')
-    ventas_file  = download_from_gdrive(VENTAS_ID)
-    print('Descargando COMPRAS desde Google Drive...')
-    compras_file = download_from_gdrive(COMPRAS_ID)
+    print('Descargando VENTAS...')
+    ventas_file  = descargar_excel('VENTAS 26-27', 'ONEDRIVE_VENTAS_2627', lambda: download_from_gdrive(VENTAS_ID))
+    print('Descargando COMPRAS...')
+    compras_file = descargar_excel('COMPRAS 26-27', 'ONEDRIVE_COMPRAS_2627', lambda: download_from_gdrive(COMPRAS_ID))
 
     print('Cargando VENTAS...')
     df_v, wb_v = load_ventas(ventas_file)
     print('Cargando COMPRAS...')
     df_c = load_compras(compras_file)
 
-    print('Descargando COTIZADOR desde Google Drive...')
-    cotizador_file = download_from_gdrive(COTIZADOR_ID)
+    print('Descargando COTIZADOR...')
+    cotizador_file = descargar_excel('COTIZADOR 26-27', 'ONEDRIVE_COTIZADOR_2627', lambda: download_from_gdrive(COTIZADOR_ID))
     print('Cargando descripciones...')
     descripciones, cotizador_prods = load_descripciones(cotizador_file)
     # Guardar tambien como JSON para respaldo
