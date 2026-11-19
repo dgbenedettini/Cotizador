@@ -249,8 +249,7 @@ function renderClients(list){
   el.innerHTML=list.map(c=>{
     const v=APP_DATA.ventas[c]||[];
     const total=v.reduce((s,x)=>s+(x.total||0),0);
-    const mb=v.filter(x=>x.mb_pct!=null);
-    const mbP=mb.length?(mb.reduce((s,x)=>s+x.mb_pct,0)/mb.length):null;
+    const mbP=mbPonderado(v);
     return '<div class="client-item" onclick="openClient(\''+c.replace(/'/g,"\\'")+'\')"><div>'
       +'<div class="client-name">'+c+'</div>'
       +'<div class="client-meta">'+v.length+' ops &middot; USD '+fmtInt(total)+(mbP!=null?'<span class="priv"> &middot; MB '+mbP.toFixed(1)+'%</span>':'')+'</div>'
@@ -269,8 +268,7 @@ function openClient(name){
   const total=v.reduce((s,x)=>s+(x.total||0),0);
   document.getElementById('d-total-usd').textContent='USD '+fmtInt(total);
   document.getElementById('d-operaciones').textContent=v.length;
-  const mb=v.filter(x=>x.mb_pct!=null);
-  const mbP=mb.length?(mb.reduce((s,x)=>s+x.mb_pct,0)/mb.length):null;
+  const mbP=mbPonderado(v);
   document.getElementById('d-mb-prom').textContent=mbP!=null?mbP.toFixed(1)+'%':'-';
   document.getElementById('hist-filter').value='';
   renderHistory(v);
@@ -702,18 +700,20 @@ renderStock(APP_DATA.catalogo);
 
 
 
+// MB ponderado (igual que Excel/Dashboard): ganancia total / venta total, con precio, costo y volumen de cada operación
+function mbPonderado(ops){var v=0,g=0;ops.forEach(function(x){if(x.mb_pct!=null&&x.precio>0&&x.volumen>0&&x.costo!=null){v+=x.precio*x.volumen;g+=(x.precio/1.1-x.costo/1.1)*x.volumen;}});return v>0?g/v*100:null;}
 function renderClientesTotal(){
   const el=document.getElementById('clientes-total'); if(!el) return;
-  let total=0, ops=0, mbS=0, mbN=0;
+  let total=0, ops=0; const todas=[];
   APP_DATA.clientes.forEach(function(c){
     (APP_DATA.ventas[c]||[]).forEach(function(x){
-      total+=(x.total||0); ops++;
-      if(x.mb_pct!=null){mbS+=x.mb_pct; mbN++;}
+      total+=(x.total||0); ops++; todas.push(x);
     });
   });
+  const mbTot=mbPonderado(todas);
   el.innerHTML='<div class="tot-main"><div class="tot-lbl">Total vendido campa&ntilde;a 26-27</div><div class="tot-val">USD '+fmtInt(total)+'</div></div>'
     +'<div class="tot-side"><div><b>'+APP_DATA.clientes.length+'</b><span>clientes</span></div><div><b>'+ops+'</b><span>operaciones</span></div>'
-    +'<div class="priv"><b>'+(mbN?(mbS/mbN).toFixed(1)+'%':'-')+'</b><span>MB promedio</span></div></div>';
+    +'<div class="priv"><b>'+(mbTot!=null?mbTot.toFixed(1)+'%':'-')+'</b><span>MB promedio</span></div></div>';
 }
 function renderQuoteResumen(){
   const el=document.getElementById('q-resumen'); if(!el) return;
