@@ -202,6 +202,37 @@ def build_movimientos(df):
         mov[k].sort(key=lambda m: m[0])
     return mov
 
+def build_pendientes(df_v, df_stock):
+    """Ventas con ESTADO = PENDIENTE (aún no entregadas).
+    'desc' = True si la hoja STOCK ya tiene la salida (mismo cliente, producto, fecha y volumen):
+    en ese caso la mercadería sigue en depósito aunque no figure en el stock.
+    'desc' = False (lo normal): todavía no se descontó, figura en el stock pero está comprometida."""
+    if 'ESTADO' not in df_v.columns:
+        return []
+    up = lambda x: '' if x is None or (isinstance(x, float) and pd.isna(x)) else str(x).strip().upper()
+    nombres_stock = {}
+    for p in df_stock['PRODUCTO'].unique():
+        nombres_stock.setdefault(str(p).strip().upper(), str(p).strip())
+    salidas = [(_fecha_iso(r['FECHA']), up(r['CLIENTE']), up(r['PRODUCTO']), round(float(r['VOLUMEN']), 2))
+               for _, r in df_stock.iterrows() if pd.notna(r['VOLUMEN']) and r['VOLUMEN'] < 0]
+    usadas = set()
+    out = []
+    for _, r in df_v.iterrows():
+        if up(r['ESTADO']) != 'PENDIENTE':
+            continue
+        vol = float(r['VOLUMEN']) if pd.notna(r['VOLUMEN']) else 0.0
+        fecha, cli, prod = _fecha_iso(r['FECHA']), up(r['CLIENTE']), up(r['PRODUCTO'])
+        desc = False
+        for i, s in enumerate(salidas):
+            if i not in usadas and s[0] == fecha and s[1] == cli and s[2] == prod and abs(s[3] + vol) < 0.01:
+                usadas.add(i); desc = True; break
+        out.append({'fecha': fecha, 'cliente': str(r['CLIENTE']).strip(),
+                    'producto': nombres_stock.get(prod, str(r['PRODUCTO']).strip()),
+                    'volumen': vol,
+                    'total': float(r['TOTAL C/IVA']) if pd.notna(r['TOTAL C/IVA']) else 0.0,
+                    'desc': desc})
+    return out
+
 def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     cp    = calc_costo_ponderado(df_c)
     stock, df_stock = calc_stock(wb_v)
@@ -211,6 +242,12 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
     except Exception as ex:   # si falla el detalle, la actualización sigue igual
         print(f'  AVISO: no se pudieron armar los movimientos de stock: {ex}')
         movimientos = {}
+    try:
+        pendientes = build_pendientes(df_v, df_stock)
+        print(f'  Ventas pendientes de entrega: {len(pendientes)} ({sum(1 for p in pendientes if p["desc"])} ya descontadas en STOCK)')
+    except Exception as ex:   # si falla, la actualización sigue igual
+        print(f'  AVISO: no se pudieron armar las ventas pendientes: {ex}')
+        pendientes = []
     catalog = cp.merge(stock, on='PRODUCTO', how='left')
     catalog['STOCK'] = catalog['STOCK'].fillna(0).round(1)
     lab_map = df_c[df_c['COSTO'].notna()].groupby('PRODUCTO')['COMPAÑÍA'].first().reset_index()
@@ -278,14 +315,16 @@ def build_app_data(df_v, df_c, wb_v, descripciones, cotizador_prods):
             'costo':     float(row['COSTO_POND'])  if pd.notna(row['COSTO_POND'])    else None,
             'mb_pct':    row['MB_PCT'],
             'condicion': str(row['CONDICION'])     if pd.notna(row['CONDICION'])     else '',
-            'total':     float(row['TOTAL C/IVA']) if pd.notna(row['TOTAL C/IVA'])   else None
+            'total':     float(row['TOTAL C/IVA']) if pd.notna(row['TOTAL C/IVA'])   else None,
+            'estado':    str(row['ESTADO']).strip().upper() if 'ESTADO' in row.index and pd.notna(row['ESTADO']) else ''
         })
 
     return {
         'catalogo': catalog_json,
         'clientes': sorted(ventas_json.keys()),
         'ventas':   ventas_json,
-        'movimientos': movimientos
+        'movimientos': movimientos,
+        'pendientes': pendientes
     }
 
 def update_html(app_data):
